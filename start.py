@@ -1469,11 +1469,11 @@ if __name__ == "__main__":
     # Initialize event
     event = threading.Event()
 
+    # Set the timer
+    timer = time.time() + attack_time  # 在这里定义 timer
+
     # Start the attack
     start_attack(method, threads, event, socks_type)
-
-    # Set the timer
-    timer = time.time() + attack_time
 
     # Wait for the attack to finish
     while time.time() < timer:
