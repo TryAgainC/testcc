@@ -475,8 +475,7 @@ def start_attack(method, threads, event, socks_type, proxies=None):
     if (cmethod != "HIT") and (cmethod not in Methods.LAYER4_METHODS) and (cmethod not in Methods.ALL_METHODS) and (cmethod != "OSTRESS"):
         out_file = str("files/proxys/" + sys.argv[5])
         proxydl(out_file, socks_type)
-        print("{} Attack Started To {}:{} For {} Seconds With {}/{} Proxy ".format(method, target, port, sys.argv[7],
-                                                                                   len(proxies), str(nums)))
+        print("{} Attack Started To {}:{} For {} Seconds With {}/{} Proxy ".format(method, target, port, sys.argv[7], len(proxies), str(nums)))
     else:
         print("{} Attack Started To {}:{} For {} Seconds".format(method, target, port, sys.argv[7]))
     try:
@@ -1455,10 +1454,11 @@ if __name__ == "__main__":
         print("Usage: python3 start.py <method> <url> <threads> <time> <proxy_file> <timeout> <socks_type>")
         sys.exit(1)
 
+    # Parse command-line arguments
     method = sys.argv[1]
     url = sys.argv[2]
     threads = int(sys.argv[3])
-    attack_time = int(sys.argv[4])  # 使用 attack_time 代替 time
+    attack_time = int(sys.argv[4])
     proxy_file = sys.argv[5]
     timeout = int(sys.argv[6])
     socks_type = int(sys.argv[7])
@@ -1470,13 +1470,13 @@ if __name__ == "__main__":
     event = threading.Event()
 
     # Set the timer
-    timer = time.time() + attack_time  # 使用 attack_time 代替 time
+    end_time = time.time() + attack_time
 
     # Start the attack
     start_attack(method, threads, event, socks_type)
 
     # Wait for the attack to finish
-    while time.time() < timer:
+    while time.time() < end_time:
         time.sleep(1)
 
     print("Attack finished!")
