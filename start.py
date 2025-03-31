@@ -22,7 +22,6 @@ from subprocess import run, PIPE
 from sys import argv
 from sys import exit as _exit
 from threading import Event, Thread
-from time import sleep, time
 from typing import Any, List, Set, Tuple
 from urllib import parse
 from uuid import UUID, uuid4
